@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>M4A Audio Compressor — iPhone Safari対応</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Inter", sans-serif;
+      background-color: #0b1120;
+      color: #f1f5f9;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card {
+      background: rgba(30, 41, 59, 0.88);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 32px;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      border-radius: 999px;
+      background: #334155;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #0f172a;
+      margin-top: -9px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+    }
+    input[type="range"]:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-12">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-slate-900/95 border-b border-slate-800 backdrop-blur">
+    <div class="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div>
+        <h1 class="text-base font-bold text-white tracking-tight">M4A Audio Compressor</h1>
+        <p class="text-[11px] text-slate-400">端末内完結・Web Audio API ＋ AAC(M4A)再エンコード</p>
+      </div>
+      <span id="encoderBadge" class="text-[10px] font-medium px-2.5 py-1 rounded-full bg-slate-800 text-sky-300 border border-sky-500/30">
+        ローカル処理
+      </span>
+    </div>
+  </header>
+
+  <!-- Main Single-Page Vertical Scroll Container -->
+  <main class="max-w-xl mx-auto px-4 pt-4 space-y-4">
+
+    <!-- Error / Warning Banner -->
+    <div id="alertBox" class="hidden rounded-2xl p-4 border text-xs leading-relaxed space-y-1">
+      <div id="alertTitle" class="font-bold text-sm"></div>
+      <div id="alertMessage"></div>
+    </div>
+
+    <!-- ===================================== -->
+    <!-- 1. ファイル選択エリア                  -->
+    <!-- ===================================== -->
+    <section class="card rounded-2xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">1</span>
+          ファイル選択
+        </h2>
+        <span class="text-[11px] text-slate-400">対象: .m4a</span>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-2.5">
+        <label for="m4aInput" id="m4aInputLabel" class="flex-1 cursor-pointer flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-sky-500 active:bg-sky-600 text-slate-950 font-bold text-sm shadow transition text-center">
+          <span>M4Aファイルを選択</span>
+          <input id="m4aInput" type="file" accept=".m4a,audio/mp4,audio/x-m4a,audio/aac" class="hidden" />
+        </label>
+        <button id="btnCancelLoad" type="button" class="hidden py-3.5 px-4 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold text-sm active:bg-rose-500/30 transition">
+          読み込みキャンセル
+        </button>
+      </div>
+
+      <div id="fileLoadingProgress" class="hidden space-y-1.5">
+        <div class="flex justify-between text-xs text-sky-300">
+          <span>音声ファイルをデコード中...</span>
+          <span id="loadProgressText">処理中</span>
+        </div>
+        <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div class="h-full bg-sky-400 animate-pulse w-2/3 rounded-full"></div>
+        </div>
+      </div>
+
+      <div id="memoryWarningBox" class="hidden rounded-xl bg-amber-500/15 border border-amber-500/40 p-3 text-xs text-amber-200 leading-relaxed">
+        ⚠️ ファイルサイズまたは再生時間が大きいため、iPhone Safariではメモリ不足が発生する可能性があります。処理に失敗する場合は短い音声でお試しください。
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 2. 読み込んだ音声情報                  -->
+    <!-- ===================================== -->
+    <section id="sectionAudioInfo" class="card rounded-2xl p-4 space-y-3 opacity-50 pointer-events-none transition-opacity">
+      <h2 class="text-sm font-bold text-white flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">2</span>
+        読み込んだ音声情報
+      </h2>
+
+      <div class="grid grid-cols-2 gap-2.5 text-xs">
+        <div class="col-span-2 bg-slate-900/70 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">ファイル名</div>
+          <div id="infoFileName" class="text-white font-medium truncate mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/70 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">ファイルサイズ</div>
+          <div id="infoFileSize" class="text-white font-mono font-medium mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/70 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">再生時間</div>
+          <div id="infoDuration" class="text-white font-mono font-medium mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/70 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">サンプリング周波数</div>
+          <div id="infoSampleRate" class="text-white font-mono font-medium mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/70 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">チャンネル数</div>
+          <div id="infoChannels" class="text-white font-mono font-medium mt-0.5">—</div>
+        </div>
+        <div class="col-span-2 bg-slate-900/70 rounded-xl p-2.5 border border-slate-800 flex items-center justify-between">
+          <span class="text-slate-400 text-[11px]">推定ビットレート</span>
+          <span id="infoBitrate" class="text-sky-300 font-mono font-semibold">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 3. 元音声・処理後音声のプレビュー       -->
+    <!-- ===================================== -->
+    <section id="sectionPreview" class="card rounded-2xl p-4 space-y-3.5 opacity-50 pointer-events-none transition-opacity">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">3</span>
+          比較プレビュー試聴
+        </h2>
+        <span id="previewBadge" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">
+          COMPRESSED
+        </span>
+      </div>
+
+      <!-- ORIGINAL / COMPRESSED Switch -->
+      <div class="grid grid-cols-2 gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+        <button id="btnModeOriginal" type="button" class="py-2.5 rounded-lg text-xs font-bold transition text-slate-400">
+          ORIGINAL（元音声）
+        </button>
+        <button id="btnModeCompressed" type="button" class="py-2.5 rounded-lg text-xs font-bold transition bg-emerald-500 text-slate-950 shadow">
+          COMPRESSED（圧縮後）
+        </button>
+      </div>
+
+      <!-- Play/Pause + Seek -->
+      <div class="flex items-center gap-3">
+        <button id="btnPreviewPlay" type="button" class="w-12 h-12 shrink-0 rounded-full bg-sky-500 active:bg-sky-600 text-slate-950 font-bold text-lg flex items-center justify-center shadow transition">
+          ▶
+        </button>
+        <div class="flex-1 space-y-1">
+          <input id="previewSeek" type="range" min="0" max="100" step="0.1" value="0" />
+          <div class="flex justify-between text-[11px] font-mono text-slate-400 -mt-1">
+            <span id="previewTimeCurrent">00:00</span>
+            <span id="previewTimeTotal">00:00</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-[11px] text-slate-400 leading-relaxed">
+        再生中に「ORIGINAL / COMPRESSED」を切り替えると、同じ再生位置のまま即座に聴き比べできます。下の圧縮設定やゲイン調整もリアルタイムに反映されます。（※iPhone Safariでは本体横の消音スイッチがONだとWeb Audioの音が出ないため、消音を解除してご試聴ください）
+      </p>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 4. ダイナミクス圧縮設定                -->
+    <!-- ===================================== -->
+    <section id="sectionCompressor" class="card rounded-2xl p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">4</span>
+          ダイナミクス圧縮設定
+        </h2>
+        <span class="text-[11px] text-slate-400">DynamicsCompressorNode</span>
+      </div>
+
+      <!-- Presets -->
+      <div class="grid grid-cols-4 gap-2">
+        <button id="presetStd" type="button" class="py-2.5 rounded-xl text-xs font-bold border transition bg-sky-500/20 text-sky-300 border-sky-400/50">
+          標準
+        </button>
+        <button id="presetWeak" type="button" class="py-2.5 rounded-xl text-xs font-bold border transition bg-slate-800/80 text-slate-300 border-slate-700">
+          弱
+        </button>
+        <button id="presetMed" type="button" class="py-2.5 rounded-xl text-xs font-bold border transition bg-slate-800/80 text-slate-300 border-slate-700">
+          中
+        </button>
+        <button id="presetStrong" type="button" class="py-2.5 rounded-xl text-xs font-bold border transition bg-slate-800/80 text-slate-300 border-slate-700">
+          強
+        </button>
+      </div>
+
+      <!-- Sliders -->
+      <div class="space-y-3 pt-1">
+        <div>
+          <div class="flex justify-between text-xs mb-0.5">
+            <label for="paramThreshold" class="font-medium text-slate-200">Threshold（しきい値）</label>
+            <span id="dispThreshold" class="font-mono font-bold text-sky-300">-24 dB</span>
+          </div>
+          <input id="paramThreshold" type="range" min="-60" max="0" step="1" value="-24" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-xs mb-0.5">
+            <label for="paramKnee" class="font-medium text-slate-200">Knee（ニー）</label>
+            <span id="dispKnee" class="font-mono font-bold text-sky-300">18 dB</span>
+          </div>
+          <input id="paramKnee" type="range" min="0" max="40" step="1" value="18" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-xs mb-0.5">
+            <label for="paramRatio" class="font-medium text-slate-200">Ratio（圧縮比）</label>
+            <span id="dispRatio" class="font-mono font-bold text-sky-300">4 : 1</span>
+          </div>
+          <input id="paramRatio" type="range" min="1" max="20" step="0.5" value="4" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-xs mb-0.5">
+            <label for="paramAttack" class="font-medium text-slate-200">Attack（アタック）</label>
+            <span id="dispAttack" class="font-mono font-bold text-sky-300">0.003 秒</span>
+          </div>
+          <input id="paramAttack" type="range" min="0" max="1" step="0.001" value="0.003" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-xs mb-0.5">
+            <label for="paramRelease" class="font-medium text-slate-200">Release（リリース）</label>
+            <span id="dispRelease" class="font-mono font-bold text-sky-300">0.250 秒</span>
+          </div>
+          <input id="paramRelease" type="range" min="0" max="1" step="0.01" value="0.25" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 5. 音量補正設定                        -->
+    <!-- ===================================== -->
+    <section class="card rounded-2xl p-4 space-y-3.5">
+      <h2 class="text-sm font-bold text-white flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">5</span>
+        音量補正設定（GainNode）
+      </h2>
+
+      <div>
+        <div class="flex justify-between text-xs mb-0.5">
+          <label for="paramMakeup" class="font-medium text-slate-200">メイクアップゲイン</label>
+          <span id="dispMakeup" class="font-mono font-bold text-emerald-300">0.0 dB</span>
+        </div>
+        <input id="paramMakeup" type="range" min="0" max="12" step="0.5" value="0" />
+      </div>
+
+      <div class="flex items-center justify-between bg-slate-900/75 rounded-xl p-3 border border-slate-800">
+        <div>
+          <div class="text-xs font-semibold text-white">自動ピーク正規化（-1 dBFS）</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">圧縮後のピーク値を測定し、音割れしない範囲で自動調整</div>
+        </div>
+        <button id="toggleNormalize" type="button" role="switch" aria-checked="true" class="w-14 h-8 rounded-full bg-emerald-500 p-1 transition flex items-center justify-end shrink-0">
+          <span class="w-6 h-6 rounded-full bg-white shadow"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 6. 出力設定                            -->
+    <!-- ===================================== -->
+    <section class="card rounded-2xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs flex items-center justify-center font-bold">6</span>
+          出力設定（M4A / AAC固定）
+        </h2>
+        <span class="text-[11px] text-slate-400">サンプリング・ch数は入力維持</span>
+      </div>
+
+      <div class="grid grid-cols-1 gap-2">
+        <label for="selectBitrate" class="text-xs text-slate-300 font-medium">AACビットレート</label>
+        <select id="selectBitrate" class="w-full py-3 px-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white font-medium focus:outline-none focus:border-sky-400">
+          <option value="64">64 kbps（容量優先）</option>
+          <option value="96">96 kbps（音声・会話向け）</option>
+          <option value="128" selected>128 kbps（標準）</option>
+          <option value="192">192 kbps（高音質）</option>
+          <option value="256">256 kbps（高音質・容量より品質優先）</option>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-1 gap-2 pt-1">
+        <label for="selectEncoderEngine" class="text-xs text-slate-300 font-medium">M4Aエンコード方式</label>
+        <select id="selectEncoderEngine" class="w-full py-3 px-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white font-medium focus:outline-none focus:border-sky-400">
+          <option value="auto" selected>自動（高速WebCodecs＋再生検証＋FFmpeg切替）</option>
+          <option value="ffmpeg">FFmpeg.wasm（iPhone互換・WASM約30MB読込）</option>
+          <option value="webcodecs">WebCodecsのみ（超高速）</option>
+        </select>
+        <p class="text-[11px] text-slate-400">iPhoneのファイルアプリで確実に再生できる純正M4Aコンテナを作るには「FFmpeg.wasm」が最も安定します（初回のみ約30MB読み込み）。</p>
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 7. 処理実行ボタン                      -->
+    <!-- ===================================== -->
+    <section class="card rounded-2xl p-4 space-y-3">
+      <div class="flex gap-2.5">
+        <button id="btnProcess" type="button" disabled class="flex-1 py-4 px-4 rounded-xl bg-indigo-500 active:bg-indigo-600 text-white font-bold text-base shadow-lg disabled:opacity-40 disabled:pointer-events-none transition">
+          圧縮＆M4Aエンコードを実行
+        </button>
+        <button id="btnCancelProcess" type="button" class="hidden py-4 px-4 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold text-sm active:bg-rose-500/30 transition">
+          中止
+        </button>
+      </div>
+
+      <!-- Progress Bar -->
+      <div id="processProgressArea" class="hidden space-y-1.5">
+        <div class="flex justify-between text-xs">
+          <span id="processStepLabel" class="text-sky-300 font-medium">オフライン圧縮処理中...</span>
+          <span id="processPercentLabel" class="font-mono text-slate-300">0%</span>
+        </div>
+        <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+          <div id="processProgressBar" class="h-full bg-gradient-to-r from-sky-400 to-indigo-400 transition-all duration-150" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Inline Process Error Box -->
+      <div id="processErrorBox" class="hidden rounded-xl bg-rose-500/15 border border-rose-500/40 p-3 text-xs text-rose-200 leading-relaxed space-y-1">
+        <div id="processErrorTitle" class="font-bold"></div>
+        <div id="processErrorMsg"></div>
+      </div>
+    </section>
+
+    <!-- ===================================== -->
+    <!-- 8. 処理結果 & 9. 保存ボタン            -->
+    <!-- ===================================== -->
+    <section id="sectionResult" class="hidden card rounded-2xl p-4 space-y-4 border border-emerald-500/40">
+      <h2 class="text-sm font-bold text-emerald-300 flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 text-xs flex items-center justify-center font-bold">8</span>
+        処理結果
+      </h2>
+
+      <div class="grid grid-cols-2 gap-2.5 text-xs">
+        <div class="col-span-2 bg-slate-900/75 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">出力ファイル名</div>
+          <div id="resFileName" class="text-white font-medium truncate mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/75 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">出力ファイルサイズ</div>
+          <div id="resFileSize" class="text-white font-mono font-semibold mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/75 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">容量比較（元サイズ）</div>
+          <div id="resSizeCompare" class="text-slate-300 font-mono mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/75 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">容量削減率</div>
+          <div id="resReduction" class="text-emerald-300 font-mono font-bold mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-900/75 rounded-xl p-2.5 border border-slate-800">
+          <div class="text-slate-400 text-[11px]">AACビットレート</div>
+          <div id="resBitrate" class="text-sky-300 font-mono font-semibold mt-0.5">—</div>
+        </div>
+      </div>
+
+      <!-- Native iOS Playback Verification Player -->
+      <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-800 space-y-1.5">
+        <div class="text-[11px] text-slate-300 font-medium">出力M4A 再生確認プレイヤー（保存前の動作確認）</div>
+        <audio id="resultAudioPlayer" controls playsinline class="w-full h-10"></audio>
+      </div>
+
+      <!-- 9. 保存ボタン -->
+      <div class="pt-1 space-y-2.5">
+        <button id="btnSaveShare" type="button" class="w-full py-4 px-4 rounded-xl bg-emerald-500 active:bg-emerald-600 text-slate-950 font-bold text-base shadow-lg transition">
+          iPhoneのファイルに保存 / ダウンロード
+        </button>
+        <a id="fallbackDownloadLink" href="#" download class="hidden block w-full py-3 px-4 rounded-xl bg-slate-800 text-sky-300 border border-sky-500/40 text-center text-xs font-semibold">
+          直接ダウンロードリンクから保存する
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // ========================================================
+    // STATE MANAGEMENT
+    // ========================================================
+    const state = {
+      file: null,
+      audioBuffer: null,
+      loadToken: 0,
+      isProcessing: false,
+      cancelRequested: false,
+      previewMode: 'COMPRESSED', // 'ORIGINAL' | 'COMPRESSED'
+      isPlaying: false,
+      playbackOffset: 0,
+      playbackStartTime: 0,
+      normalizeOn: true,
+      measuredCompPeak: 1.0,
+      outputBlob: null,
+      outputFileName: '',
+      outputUrl: null
+    };
+
+    let audioCtx = null;
+    let previewSrc = null;
+    let previewComp = null;
+    let previewGain = null;
+    let previewRaf = null;
+    let ffmpegInstance = null;
+
+    // ========================================================
+    // DOM ELEMENTS
+    // ========================================================
+    const alertBox = document.getElementById('alertBox');
+    const alertTitle = document.getElementById('alertTitle');
+    const alertMessage = document.getElementById('alertMessage');
+
+    const m4aInput = document.getElementById('m4aInput');
+    const btnCancelLoad = document.getElementById('btnCancelLoad');
+    const fileLoadingProgress = document.getElementById('fileLoadingProgress');
+    const memoryWarningBox = document.getElementById('memoryWarningBox');
+
+    const sectionAudioInfo = document.getElementById('sectionAudioInfo');
+    const sectionPreview = document.getElementById('sectionPreview');
+
+    const infoFileName = document.getElementById('infoFileName');
+    const infoFileSize = document.getElementById('infoFileSize');
+    const infoDuration = document.getElementById('infoDuration');
+    const infoSampleRate = document.getElementById('infoSampleRate');
+    const infoChannels = document.getElementById('infoChannels');
+    const infoBitrate = document.getElementById('infoBitrate');
+
+    const previewBadge = document.getElementById('previewBadge');
+    const btnModeOriginal = document.getElementById('btnModeOriginal');
+    const btnModeCompressed = document.getElementById('btnModeCompressed');
+    const btnPreviewPlay = document.getElementById('btnPreviewPlay');
+    const previewSeek = document.getElementById('previewSeek');
+    const previewTimeCurrent = document.getElementById('previewTimeCurrent');
+    const previewTimeTotal = document.getElementById('previewTimeTotal');
+
+    const paramThreshold = document.getElementById('paramThreshold');
+    const paramKnee = document.getElementById('paramKnee');
+    const paramRatio = document.getElementById('paramRatio');
+    const paramAttack = document.getElementById('paramAttack');
+    const paramRelease = document.getElementById('paramRelease');
+    const paramMakeup = document.getElementById('paramMakeup');
+    const toggleNormalize = document.getElementById('toggleNormalize');
+    const selectBitrate = document.getElementById('selectBitrate');
+
+    const btnProcess = document.getElementById('btnProcess');
+    const btnCancelProcess = document.getElementById('btnCancelProcess');
+    const processProgressArea = document.getElementById('processProgressArea');
+    const processStepLabel = document.getElementById('processStepLabel');
+    const processPercentLabel = document.getElementById('processPercentLabel');
+    const processProgressBar = document.getElementById('processProgressBar');
+
+    const sectionResult = document.getElementById('sectionResult');
+    const resFileName = document.getElementById('resFileName');
+    const resFileSize = document.getElementById('resFileSize');
+    const resSizeCompare = document.getElementById('resSizeCompare');
+    const resReduction = document.getElementById('resReduction');
+    const resBitrate = document.getElementById('resBitrate');
+    const btnSaveShare = document.getElementById('btnSaveShare');
+    const fallbackDownloadLink = document.getElementById('fallbackDownloadLink');
+
+    // ========================================================
+    // UTILITIES
+    // ========================================================
+    function showAlert(type, title, msg) {
+      alertBox.classList.remove('hidden', 'bg-rose-500/15', 'border-rose-500/40', 'text-rose-200', 'bg-amber-500/15', 'border-amber-500/40', 'text-amber-200');
+      if (type === 'error') {
+        alertBox.classList.add('bg-rose-500/15', 'border-rose-500/40', 'text-rose-200');
+      } else {
+        alertBox.classList.add('bg-amber-500/15', 'border-amber-500/40', 'text-amber-200');
+      }
+      alertTitle.textContent = title;
+      alertMessage.textContent = msg;
+    }
+
+    function clearAlert() {
+      alertBox.classList.add('hidden');
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    function formatTime(sec) {
+      const s = Math.max(0, Math.floor(sec));
+      const m = Math.floor(s / 60);
+      const rem = String(s % 60).padStart(2, '0');
+      return `${String(m).padStart(2, '0')}:${rem}`;
+    }
+
+    function releaseOutputResources() {
+      if (state.outputUrl) {
+        URL.revokeObjectURL(state.outputUrl);
+        state.outputUrl = null;
+      }
+      state.outputBlob = null;
+    }
+
+    async function getAudioCtx(unlock = false) {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AC();
+      }
+      if (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') {
+        try {
+          await audioCtx.resume();
+        } catch (e) {}
+      }
+      if (unlock) {
+        try {
+          // iOS Safari audio session unlock with 1-frame silent buffer
+          const silentBuf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+          const silentSrc = audioCtx.createBufferSource();
+          silentSrc.buffer = silentBuf;
+          silentSrc.connect(audioCtx.destination);
+          silentSrc.start(0);
+        } catch (e) {}
+      }
+      return audioCtx;
+    }
+
+    // ========================================================
+    // 1. FILE SELECTION & DECODING
+    // ========================================================
+    m4aInput.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+
+      clearAlert();
+      stopPreview(true);
+      releaseOutputResources();
+      sectionResult.classList.add('hidden');
+      memoryWarningBox.classList.add('hidden');
+
+      // Validate extension / MIME
+      const isM4a = /\.m4a$/i.test(file.name) || file.type === 'audio/mp4' || file.type === 'audio/x-m4a' || file.type === 'audio/aac';
+      if (!isM4a) {
+        showAlert('error', '非対応のファイル形式です', '拡張子が .m4a の音声ファイルを選択してください。');
+        m4aInput.value = '';
+        return;
+      }
+
+      if (file.size > 45 * 1024 * 1024) {
+        memoryWarningBox.classList.remove('hidden');
+      }
+
+      const currentToken = ++state.loadToken;
+      state.file = file;
+      state.audioBuffer = null;
+
+      btnCancelLoad.classList.remove('hidden');
+      fileLoadingProgress.classList.remove('hidden');
+      btnProcess.disabled = true;
+
+      try {
+        const arrayBuf = await file.arrayBuffer();
+        if (state.loadToken !== currentToken) return; // Cancelled
+
+        const ctx = await getAudioCtx(false);
+        const decoded = await ctx.decodeAudioData(arrayBuf);
+        if (state.loadToken !== currentToken) return; // Cancelled
+
+        state.audioBuffer = decoded;
+        if (decoded.duration > 1800) {
+          memoryWarningBox.classList.remove('hidden');
+        }
+
+        // Compute peak of original buffer for quick preview normalization hint
+        let origPeak = 0;
+        for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+          const data = decoded.getChannelData(ch);
+          for (let i = 0; i < data.length; i += 8) {
+            const abs = Math.abs(data[i]);
+            if (abs > origPeak) origPeak = abs;
+          }
+        }
+        state.measuredCompPeak = origPeak > 0 ? origPeak : 1.0;
+
+        // 2. Populate Audio Info
+        const estKbps = Math.round((file.size * 8) / Math.max(0.1, decoded.duration) / 1000);
+        infoFileName.textContent = file.name;
+        infoFileSize.textContent = formatBytes(file.size);
+        infoDuration.textContent = formatTime(decoded.duration);
+        infoSampleRate.textContent = `${decoded.sampleRate.toLocaleString()} Hz`;
+        infoChannels.textContent = decoded.numberOfChannels === 1 ? '1ch (モノラル)' : `${decoded.numberOfChannels}ch (ステレオ)`;
+        infoBitrate.textContent = `約 ${estKbps} kbps`;
+
+        previewTimeTotal.textContent = formatTime(decoded.duration);
+        previewTimeCurrent.textContent = '00:00';
+        previewSeek.value = 0;
+
+        sectionAudioInfo.classList.remove('opacity-50', 'pointer-events-none');
+        sectionPreview.classList.remove('opacity-50', 'pointer-events-none');
+        btnProcess.disabled = false;
+      } catch (err) {
+        if (state.loadToken !== currentToken) return;
+        showAlert('error', '音声デコードに失敗しました', 'M4Aファイルが破損しているか、iOS Safariでデコードできない形式です。別のM4Aファイルでお試しください。');
+        state.file = null;
+        state.audioBuffer = null;
+      } finally {
+        if (state.loadToken === currentToken) {
+          btnCancelLoad.classList.add('hidden');
+          fileLoadingProgress.classList.add('hidden');
+        }
+      }
+    });
+
+    btnCancelLoad.addEventListener('click', () => {
+      state.loadToken++;
+      state.file = null;
+      state.audioBuffer = null;
+      m4aInput.value = '';
+      btnCancelLoad.classList.add('hidden');
+      fileLoadingProgress.classList.add('hidden');
+      sectionAudioInfo.classList.add('opacity-50', 'pointer-events-none');
+      sectionPreview.classList.add('opacity-50', 'pointer-events-none');
+      btnProcess.disabled = true;
+    });
+
+    // ========================================================
+    // 3. PREVIEW PLAYBACK (ORIGINAL vs COMPRESSED)
+    // ========================================================
+    function updatePreviewGraph() {
+      if (!audioCtx || !previewComp || !previewGain) return;
+      const now = audioCtx.currentTime;
+
+      if (state.previewMode === 'COMPRESSED') {
+        previewComp.threshold.setValueAtTime(parseFloat(paramThreshold.value), now);
+        previewComp.knee.setValueAtTime(parseFloat(paramKnee.value), now);
+        previewComp.ratio.setValueAtTime(parseFloat(paramRatio.value), now);
+        previewComp.attack.setValueAtTime(parseFloat(paramAttack.value), now);
+        previewComp.release.setValueAtTime(parseFloat(paramRelease.value), now);
+
+        let linearGain = Math.pow(10, parseFloat(paramMakeup.value) / 20);
+        if (state.normalizeOn) {
+          // Estimate safe gain toward -1 dBFS (~0.891) without clipping
+          const targetPeak = Math.pow(10, -1 / 20);
+          const estCompRatio = Math.max(1, parseFloat(paramRatio.value));
+          const thLinear = Math.pow(10, parseFloat(paramThreshold.value) / 20);
+          const estPeakAfterComp = state.measuredCompPeak > thLinear
+            ? thLinear + (state.measuredCompPeak - thLinear) / estCompRatio
+            : state.measuredCompPeak;
+          const normFactor = targetPeak / Math.max(0.01, estPeakAfterComp);
+          linearGain = Math.min(normFactor, Math.max(linearGain, normFactor * 0.95));
+        }
+        previewGain.gain.setValueAtTime(linearGain, now);
+      } else {
+        // ORIGINAL bypass
+        previewComp.threshold.setValueAtTime(0, now);
+        previewComp.ratio.setValueAtTime(1, now);
+        previewGain.gain.setValueAtTime(1.0, now);
+      }
+    }
+
+    function stopPreview(resetOffset = false) {
+      if (previewRaf) {
+        cancelAnimationFrame(previewRaf);
+        previewRaf = null;
+      }
+      if (previewSrc) {
+        try {
+          previewSrc.onended = null;
+          previewSrc.stop();
+          previewSrc.disconnect();
+        } catch (e) {}
+        previewSrc = null;
+      }
+      if (state.isPlaying && audioCtx) {
+        state.playbackOffset += audioCtx.currentTime - state.playbackStartTime;
+      }
+      if (resetOffset || (state.audioBuffer && state.playbackOffset >= state.audioBuffer.duration)) {
+        state.playbackOffset = 0;
+        previewSeek.value = 0;
+        previewTimeCurrent.textContent = '00:00';
+      }
+      state.isPlaying = false;
+      btnPreviewPlay.textContent = '▶';
+    }
+
+    async function startPreview(offsetSec) {
+      if (!state.audioBuffer) return;
+      stopPreview(false);
+
+      const ctx = await getAudioCtx(true);
+      if (ctx.state !== 'running') {
+        showAlert('warning', '音声の再生がブロックされています', 'iPhoneの消音（マナー）モードがONになっているか、ブラウザが音声再生を制限しています。消音モードを解除して再度▶をタップしてください。');
+      }
+      previewSrc = ctx.createBufferSource();
+      previewSrc.buffer = state.audioBuffer;
+
+      previewComp = ctx.createDynamicsCompressor();
+      previewGain = ctx.createGain();
+      updatePreviewGraph();
+
+      previewSrc.connect(previewComp);
+      previewComp.connect(previewGain);
+      previewGain.connect(ctx.destination);
+
+      state.playbackOffset = Math.max(0, Math.min(offsetSec, state.audioBuffer.duration - 0.05));
+      state.playbackStartTime = ctx.currentTime;
+      previewSrc.start(0, state.playbackOffset);
+      state.isPlaying = true;
+      btnPreviewPlay.textContent = '⏸';
+
+      previewSrc.onended = () => {
+        if (state.isPlaying) {
+          stopPreview(true);
+        }
+      };
+
+      const tick = () => {
+        if (!state.isPlaying || !state.audioBuffer) return;
+        const cur = state.playbackOffset + (ctx.currentTime - state.playbackStartTime);
+        if (cur <= state.audioBuffer.duration) {
+          previewTimeCurrent.textContent = formatTime(cur);
+          previewSeek.value = ((cur / state.audioBuffer.duration) * 100).toFixed(2);
+          previewRaf = requestAnimationFrame(tick);
+        }
+      };
+      previewRaf = requestAnimationFrame(tick);
+    }
+
+    btnPreviewPlay.addEventListener('click', () => {
+      if (!state.audioBuffer) return;
+      if (state.isPlaying) {
+        stopPreview(false);
+      } else {
+        startPreview(state.playbackOffset);
+      }
+    });
+
+    previewSeek.addEventListener('input', () => {
+      if (!state.audioBuffer) return;
+      const targetSec = (parseFloat(previewSeek.value) / 100) * state.audioBuffer.duration;
+      previewTimeCurrent.textContent = formatTime(targetSec);
+      if (state.isPlaying) {
+        startPreview(targetSec);
+      } else {
+        state.playbackOffset = targetSec;
+      }
+    });
+
+    function setPreviewMode(mode) {
+      state.previewMode = mode;
+      if (mode === 'ORIGINAL') {
+        btnModeOriginal.className = 'py-2.5 rounded-lg text-xs font-bold transition bg-slate-200 text-slate-950 shadow';
+        btnModeCompressed.className = 'py-2.5 rounded-lg text-xs font-bold transition text-slate-400';
+        previewBadge.textContent = 'ORIGINAL';
+        previewBadge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-700 text-slate-200';
+      } else {
+        btnModeOriginal.className = 'py-2.5 rounded-lg text-xs font-bold transition text-slate-400';
+        btnModeCompressed.className = 'py-2.5 rounded-lg text-xs font-bold transition bg-emerald-500 text-slate-950 shadow';
+        previewBadge.textContent = 'COMPRESSED';
+        previewBadge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300';
+      }
+      updatePreviewGraph();
+    }
+
+    btnModeOriginal.addEventListener('click', () => setPreviewMode('ORIGINAL'));
+    btnModeCompressed.addEventListener('click', () => setPreviewMode('COMPRESSED'));
+
+    // ========================================================
+    // 4. COMPRESSOR PRESETS & PARAMETERS & 5. GAIN NORMALIZE
+    // ========================================================
+    function syncParamDisplays() {
+      document.getElementById('dispThreshold').textContent = `${paramThreshold.value} dB`;
+      document.getElementById('dispKnee').textContent = `${paramKnee.value} dB`;
+      document.getElementById('dispRatio').textContent = `${parseFloat(paramRatio.value)} : 1`;
+      document.getElementById('dispAttack').textContent = `${parseFloat(paramAttack.value).toFixed(3)} 秒`;
+      document.getElementById('dispRelease').textContent = `${parseFloat(paramRelease.value).toFixed(3)} 秒`;
+      document.getElementById('dispMakeup').textContent = `${parseFloat(paramMakeup.value).toFixed(1)} dB`;
+      updatePreviewGraph();
+    }
+
+    const presetBtns = {
+      std: document.getElementById('presetStd'),
+      weak: document.getElementById('presetWeak'),
+      med: document.getElementById('presetMed'),
+      strong: document.getElementById('presetStrong')
+    };
+
+    function highlightPreset(activeKey) {
+      Object.entries(presetBtns).forEach(([k, btn]) => {
+        if (k === activeKey) {
+          btn.className = 'py-2.5 rounded-xl text-xs font-bold border transition bg-sky-500/20 text-sky-300 border-sky-400/50';
+        } else {
+          btn.className = 'py-2.5 rounded-xl text-xs font-bold border transition bg-slate-800/80 text-slate-300 border-slate-700';
+        }
+      });
+    }
+
+    presetBtns.std.addEventListener('click', () => {
+      paramThreshold.value = -24;
+      paramKnee.value = 18;
+      paramRatio.value = 4;
+      paramAttack.value = 0.003;
+      paramRelease.value = 0.25;
+      highlightPreset('std');
+      syncParamDisplays();
+    });
+
+    presetBtns.weak.addEventListener('click', () => {
+      paramThreshold.value = -18;
+      paramRatio.value = 2;
+      highlightPreset('weak');
+      syncParamDisplays();
+    });
+
+    presetBtns.med.addEventListener('click', () => {
+      paramThreshold.value = -24;
+      paramRatio.value = 4;
+      highlightPreset('med');
+      syncParamDisplays();
+    });
+
+    presetBtns.strong.addEventListener('click', () => {
+      paramThreshold.value = -30;
+      paramRatio.value = 8;
+      highlightPreset('strong');
+      syncParamDisplays();
+    });
+
+    [paramThreshold, paramKnee, paramRatio, paramAttack, paramRelease, paramMakeup].forEach(el => {
+      el.addEventListener('input', () => {
+        highlightPreset(null);
+        syncParamDisplays();
+      });
+    });
+
+    toggleNormalize.addEventListener('click', () => {
+      state.normalizeOn = !state.normalizeOn;
+      toggleNormalize.setAttribute('aria-checked', String(state.normalizeOn));
+      if (state.normalizeOn) {
+        toggleNormalize.className = 'w-14 h-8 rounded-full bg-emerald-500 p-1 transition flex items-center justify-end shrink-0';
+      } else {
+        toggleNormalize.className = 'w-14 h-8 rounded-full bg-slate-700 p-1 transition flex items-center justify-start shrink-0';
+      }
+      updatePreviewGraph();
+    });
+
+    // ========================================================
+    // 7. OFFLINE PROCESSING + AAC/M4A ENCODING
+    // ========================================================
+    function setProgress(pct, text) {
+      processProgressBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      processPercentLabel.textContent = `${Math.round(pct)}%`;
+      if (text) processStepLabel.textContent = text;
+    }
+
+    function buildAacLcAudioSpecificConfig(sampleRate, channels) {
+      const freqTable = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+      let freqIdx = freqTable.indexOf(sampleRate);
+      if (freqIdx === -1) freqIdx = 4; // fallback 44100Hz
+      const objType = 2; // AAC-LC
+      const byte0 = (objType << 3) | (freqIdx >> 1);
+      const byte1 = ((freqIdx & 1) << 7) | ((channels & 0x0f) << 3);
+      return new Uint8Array([byte0, byte1]);
+    }
+
+    // Priority 1: WebCodecs AudioEncoder + mp4-muxer
+    async function encodeWithWebCodecs(renderedBuffer, bitrateKbps) {
+      if (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined' || typeof Mp4Muxer === 'undefined') {
+        throw new Error('WEBCODECS_UNAVAILABLE');
+      }
+      const sampleRate = renderedBuffer.sampleRate;
+      const numberOfChannels = renderedBuffer.numberOfChannels;
+      const config = {
+        codec: 'mp4a.40.2',
+        sampleRate,
+        numberOfChannels,
+        bitrate: bitrateKbps * 1000,
+        aac: { format: 'aac' }
+      };
+      let support = await AudioEncoder.isConfigSupported(config);
+      if (!support || !support.supported) {
+        delete config.aac;
+        support = await AudioEncoder.isConfigSupported(config);
+        if (!support || !support.supported) {
+          throw new Error('WEBCODECS_UNSUPPORTED');
+        }
+      }
+
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        audio: {
+          codec: 'aac',
+          numberOfChannels,
+          sampleRate
+        },
+        fastStart: 'in-memory'
+      });
+
+      let encoderError = null;
+      let sentConfig = false;
+      const fallbackDesc = buildAacLcAudioSpecificConfig(sampleRate, numberOfChannels);
+
+      const encoder = new AudioEncoder({
+        output: (chunk, meta) => {
+          const safeMeta = meta ? { ...meta } : {};
+          if (!sentConfig) {
+            if (!safeMeta.decoderConfig) {
+              safeMeta.decoderConfig = {
+                codec: 'mp4a.40.2',
+                sampleRate,
+                numberOfChannels,
+                description: fallbackDesc
+              };
+            } else if (!safeMeta.decoderConfig.description || safeMeta.decoderConfig.description.byteLength === 0) {
+              safeMeta.decoderConfig = {
+                ...safeMeta.decoderConfig,
+                description: fallbackDesc
+              };
+            }
+            sentConfig = true;
+          }
+          // Check for ADTS syncword (0xFFFx) and strip 7-byte ADTS header if present
+          const rawBytes = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(rawBytes);
+          let payload = rawBytes;
+          if (rawBytes.length > 7 && rawBytes[0] === 0xff && (rawBytes[1] & 0xf0) === 0xf0) {
+            const headerLen = (rawBytes[1] & 0x01) === 0 ? 9 : 7;
+            if (rawBytes.length > headerLen) {
+              payload = rawBytes.subarray(headerLen);
+            }
+          }
+          const cleanChunk = new EncodedAudioChunk({
+            type: chunk.type,
+            timestamp: chunk.timestamp,
+            duration: chunk.duration,
+            data: payload
+          });
+          muxer.addAudioChunk(cleanChunk, safeMeta);
+        },
+        error: (err) => { encoderError = err; }
+      });
+      encoder.configure(config);
+
+      const totalFrames = renderedBuffer.length;
+      const chunkFrames = 4096;
+      const channels = [];
+      for (let c = 0; c < numberOfChannels; c++) {
+        channels.push(renderedBuffer.getChannelData(c));
+      }
+
+      for (let offset = 0; offset < totalFrames; offset += chunkFrames) {
+        if (state.cancelRequested) {
+          encoder.close();
+          throw new Error('CANCELLED');
+        }
+        if (encoderError) throw encoderError;
+
+        const frames = Math.min(chunkFrames, totalFrames - offset);
+        const planarData = new Float32Array(frames * numberOfChannels);
+        for (let c = 0; c < numberOfChannels; c++) {
+          planarData.set(channels[c].subarray(offset, offset + frames), c * frames);
+        }
+
+        const audioData = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: frames,
+          numberOfChannels,
+          timestamp: Math.round((offset / sampleRate) * 1_000_000),
+          data: planarData
+        });
+        encoder.encode(audioData);
+        audioData.close();
+
+        // Yield periodically to keep UI responsive & allow cancel
+        if ((offset / chunkFrames) % 16 === 0) {
+          setProgress(40 + (offset / totalFrames) * 55, 'AAC(M4A)エンコード中...');
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      await encoder.flush();
+      encoder.close();
+      if (encoderError) throw encoderError;
+
+      muxer.finalize();
+      return new Blob([muxer.target.buffer], { type: 'audio/mp4' });
+    }
+
+    // Priority 2 Fallback: Single-threaded FFmpeg.wasm
+    function audioBufferToWavUint8(buffer) {
+      const numChannels = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const numFrames = buffer.length;
+      const dataSize = numFrames * numChannels * 2;
+      const ab = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(ab);
+      const writeStr = (off, str) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numChannels * 2, true);
+      view.setUint16(32, numChannels * 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      const chans = [];
+      for (let c = 0; c < numChannels; c++) chans.push(buffer.getChannelData(c));
+      let offset = 44;
+      for (let i = 0; i < numFrames; i++) {
+        for (let c = 0; c < numChannels; c++) {
+          const s = Math.max(-1, Math.min(1, chans[c][i]));
+          view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+          offset += 2;
+        }
+      }
+      return new Uint8Array(ab);
+    }
+
+    async function loadScriptOnce(src) {
+      if (document.querySelector(`script[src="${src}"]`)) return;
+      await new Promise((resolve, reject) => {
+        const sc = document.createElement('script');
+        sc.src = src;
+        sc.onload = resolve;
+        sc.onerror = () => reject(new Error('FFMPEG_SCRIPT_LOAD_FAILED'));
+        document.head.appendChild(sc);
+      });
+    }
+
+    let ffmpegCoreWasmUrl = null;
+    async function encodeWithFFmpegWasm(renderedBuffer, bitrateKbps) {
+      setProgress(45, 'AACエンコーダー(FFmpegコア)を読み込み中...');
+      const coreBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+      await loadScriptOnce(`${coreBase}/ffmpeg-core.js`);
+
+      if (!ffmpegCoreWasmUrl) {
+        setProgress(52, 'FFmpeg WASM本体を取得中（初回のみ約30MB）...');
+        const wasmResp = await fetch(`${coreBase}/ffmpeg-core.wasm`);
+        if (!wasmResp.ok) throw new Error(`WASM_FETCH_FAILED_${wasmResp.status}`);
+        const wasmBlob = await wasmResp.blob();
+        ffmpegCoreWasmUrl = URL.createObjectURL(new Blob([wasmBlob], { type: 'application/wasm' }));
+      }
+
+      if (!ffmpegInstance) {
+        setProgress(62, 'FFmpegコアを初期化中...');
+        await new Promise(r => setTimeout(r, 30));
+        if (typeof window.createFFmpegCore !== 'function') {
+          throw new Error('FFMPEG_CORE_NOT_LOADED');
+        }
+        ffmpegInstance = await window.createFFmpegCore({
+          locateFile: (path) => path.endsWith('.wasm') ? ffmpegCoreWasmUrl : path
+        });
+      }
+
+      if (state.cancelRequested) throw new Error('CANCELLED');
+      setProgress(75, 'FFmpegでAAC(M4A)へ変換中（数秒〜十数秒お待ちください）...');
+      await new Promise(r => setTimeout(r, 50));
+
+      const wavBytes = audioBufferToWavUint8(renderedBuffer);
+      ffmpegInstance.FS.writeFile('in.wav', wavBytes);
+      const exitCode = ffmpegInstance.exec(
+        '-i', 'in.wav',
+        '-c:a', 'aac',
+        '-b:a', `${bitrateKbps}k`,
+        '-movflags', '+faststart',
+        '-f', 'ipod',
+        'out.m4a'
+      );
+      if (exitCode !== 0) {
+        try { ffmpegInstance.FS.unlink('in.wav'); } catch (e) {}
+        throw new Error(`FFMPEG_EXEC_EXIT_${exitCode}`);
+      }
+      const outData = ffmpegInstance.FS.readFile('out.m4a');
+      const resultCopy = new Uint8Array(outData);
+      try { ffmpegInstance.FS.unlink('in.wav'); } catch (e) {}
+      try { ffmpegInstance.FS.unlink('out.m4a'); } catch (e) {}
+      return new Blob([resultCopy.buffer], { type: 'audio/mp4' });
+    }
+
+    btnProcess.addEventListener('click', async () => {
+      if (!state.audioBuffer || state.isProcessing) return;
+
+      clearAlert();
+      document.getElementById('processErrorBox').classList.add('hidden');
+      stopPreview(false);
+      releaseOutputResources();
+      sectionResult.classList.add('hidden');
+
+      state.isProcessing = true;
+      state.cancelRequested = false;
+      btnProcess.disabled = true;
+      btnCancelProcess.classList.remove('hidden');
+      processProgressArea.classList.remove('hidden');
+      setProgress(5, 'OfflineAudioContextでダイナミクス圧縮中...');
+
+      try {
+        const buf = state.audioBuffer;
+        const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const offlineCtx = new OfflineCtx(buf.numberOfChannels, buf.length, buf.sampleRate);
+
+        const src = offlineCtx.createBufferSource();
+        src.buffer = buf;
+
+        const comp = offlineCtx.createDynamicsCompressor();
+        comp.threshold.setValueAtTime(parseFloat(paramThreshold.value), 0);
+        comp.knee.setValueAtTime(parseFloat(paramKnee.value), 0);
+        comp.ratio.setValueAtTime(parseFloat(paramRatio.value), 0);
+        comp.attack.setValueAtTime(parseFloat(paramAttack.value), 0);
+        comp.release.setValueAtTime(parseFloat(paramRelease.value), 0);
+
+        const gainNode = offlineCtx.createGain();
+        const makeupLinear = Math.pow(10, parseFloat(paramMakeup.value) / 20);
+        gainNode.gain.setValueAtTime(makeupLinear, 0);
+
+        src.connect(comp);
+        comp.connect(gainNode);
+        gainNode.connect(offlineCtx.destination);
+        src.start(0);
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        if (state.cancelRequested) throw new Error('CANCELLED');
+
+        setProgress(30, 'ピーク値測定および音量補正（クリッピング防止）...');
+        // Measure peak across all channels
+        let maxPeak = 0;
+        for (let c = 0; c < renderedBuffer.numberOfChannels; c++) {
+          const data = renderedBuffer.getChannelData(c);
+          for (let i = 0; i < data.length; i++) {
+            const abs = Math.abs(data[i]);
+            if (abs > maxPeak) maxPeak = abs;
+          }
+        }
+
+        // Normalize to -1 dBFS if ON, or prevent > -0.1 dBFS clipping if OFF
+        const targetPeak = Math.pow(10, -1 / 20); // ~0.89125
+        let scaleFactor = 1.0;
+        if (maxPeak > 0) {
+          if (state.normalizeOn) {
+            scaleFactor = targetPeak / maxPeak;
+          } else if (maxPeak > 0.988) {
+            scaleFactor = 0.988 / maxPeak;
+          }
+        }
+        if (Math.abs(scaleFactor - 1.0) > 0.0001) {
+          for (let c = 0; c < renderedBuffer.numberOfChannels; c++) {
+            const data = renderedBuffer.getChannelData(c);
+            for (let i = 0; i < data.length; i++) {
+              data[i] *= scaleFactor;
+            }
+          }
+        }
+
+        if (state.cancelRequested) throw new Error('CANCELLED');
+
+        // Encode to M4A (AAC)
+        const bitrateKbps = parseInt(selectBitrate.value, 10);
+        const engineMode = document.getElementById('selectEncoderEngine').value;
+        let m4aBlob = null;
+
+        if (engineMode === 'ffmpeg') {
+          m4aBlob = await encodeWithFFmpegWasm(renderedBuffer, bitrateKbps);
+        } else if (engineMode === 'webcodecs') {
+          m4aBlob = await encodeWithWebCodecs(renderedBuffer, bitrateKbps);
+        } else {
+          // auto: try WebCodecs then verify native <audio> + decodeAudioData compatibility; fallback to FFmpeg if invalid
+          try {
+            m4aBlob = await encodeWithWebCodecs(renderedBuffer, bitrateKbps);
+            setProgress(96, 'M4Aデコード互換性をチェック中...');
+            const testCtx = await getAudioCtx(false);
+            const testDecoded = await testCtx.decodeAudioData(await m4aBlob.arrayBuffer());
+            if (!testDecoded || testDecoded.duration <= 0) {
+              throw new Error('DECODE_VERIFY_EMPTY');
+            }
+          } catch (wcErr) {
+            if (wcErr && wcErr.message === 'CANCELLED') throw wcErr;
+            m4aBlob = await encodeWithFFmpegWasm(renderedBuffer, bitrateKbps);
+          }
+        }
+
+        if (state.cancelRequested) throw new Error('CANCELLED');
+
+        setProgress(100, '処理完了！');
+        const baseName = state.file.name.replace(/\.[^/.]+$/, '');
+        const outName = `${baseName}_compressed.m4a`;
+
+        state.outputBlob = m4aBlob;
+        state.outputFileName = outName;
+        state.outputUrl = URL.createObjectURL(m4aBlob);
+
+        // 8. Show Results
+        const origSize = state.file.size;
+        const outSize = m4aBlob.size;
+        const reductionPct = ((origSize - outSize) / origSize) * 100;
+
+        resFileName.textContent = outName;
+        resFileSize.textContent = formatBytes(outSize);
+        resSizeCompare.textContent = `${formatBytes(origSize)} → ${formatBytes(outSize)}`;
+        resReduction.textContent = `${reductionPct.toFixed(1)}%`;
+        resReduction.className = reductionPct >= 0
+          ? 'text-emerald-300 font-mono font-bold mt-0.5'
+          : 'text-amber-300 font-mono font-bold mt-0.5';
+        resBitrate.textContent = `${bitrateKbps} kbps (AAC / M4A)`;
+
+        const resultAudioPlayer = document.getElementById('resultAudioPlayer');
+        resultAudioPlayer.src = state.outputUrl;
+        fallbackDownloadLink.href = state.outputUrl;
+        fallbackDownloadLink.download = outName;
+        fallbackDownloadLink.classList.remove('hidden');
+        sectionResult.classList.remove('hidden');
+      } catch (err) {
+        const errDetail = err && err.message ? err.message : String(err || '不明なエラー');
+        const pErrBox = document.getElementById('processErrorBox');
+        const pErrTitle = document.getElementById('processErrorTitle');
+        const pErrMsg = document.getElementById('processErrorMsg');
+        if (err && err.message === 'CANCELLED') {
+          showAlert('warning', '処理をキャンセルしました', '一時データは解放されました。設定を見直して再度実行できます。');
+        } else {
+          const msg = `AACエンコードを実行できませんでした（詳細: ${errDetail}）。WAV形式への変更は行わずに中断しました。`;
+          showAlert('error', 'AAC(M4A)エンコードに失敗しました', msg);
+          pErrTitle.textContent = 'AAC(M4A)エンコードに失敗しました';
+          pErrMsg.textContent = msg;
+          pErrBox.classList.remove('hidden');
+        }
+      } finally {
+        state.isProcessing = false;
+        btnProcess.disabled = !state.audioBuffer;
+        btnCancelProcess.classList.add('hidden');
+        setTimeout(() => {
+          if (!state.isProcessing) processProgressArea.classList.add('hidden');
+        }, 1200);
+      }
+    });
+
+    btnCancelProcess.addEventListener('click', () => {
+      if (state.isProcessing) {
+        state.cancelRequested = true;
+        processStepLabel.textContent = 'キャンセル処理中...';
+      }
+    });
+
+    // ========================================================
+    // 9. SAVE TO IPHONE FILES (WEB SHARE API + FALLBACK)
+    // ========================================================
+    btnSaveShare.addEventListener('click', async () => {
+      if (!state.outputBlob || !state.outputFileName) return;
+      try {
+        const shareFile = new File([state.outputBlob], state.outputFileName, { type: 'audio/mp4' });
+        if (navigator.canShare && navigator.canShare({ files: [shareFile] })) {
+          await navigator.share({
+            files: [shareFile],
+            title: state.outputFileName
+          });
+          return;
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // User cancelled share sheet
+      }
+
+      // Fallback download link click
+      try {
+        const a = document.createElement('a');
+        a.href = state.outputUrl;
+        a.download = state.outputFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (dlErr) {
+        showAlert('error', '保存に失敗しました', '下の「直接ダウンロードリンクから保存する」をタップして再保存をお試しください。');
+      }
+    });
+
+    // Initialize displays
+    syncParamDisplays();
+  </script>
+</body>
+</html>
